@@ -40,13 +40,37 @@ jobs:
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31.11.1
+
+      - name: Instantiate npb
+        id: instantiate-npb
+        run: |
+          drv="$(nix eval --raw --apply 'builtins.getAttr "drvPath"' github:samestep/npb)"
+          printf 'drv=%s\n' "$drv" >>"$GITHUB_OUTPUT"
+          output="$(nix-store --query --outputs "$drv")"
+          printf 'output=%s\n' "$output" >>"$GITHUB_OUTPUT"
+
+      - name: Restore npb cache
+        id: cache-npb
+        uses: actions/cache@v6
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
+          path: npb.cache
+          key: ${{ steps.instantiate-npb.outputs.drv }}
+
+      - name: Unpack cached npb
+        if: steps.cache-npb.outputs.cache-hit == 'true'
+        run: |
+          nix-store --import <npb.cache
+          rm npb.cache
+
+      - name: Build npb
+        env:
+          DRV: ${{ steps.instantiate-npb.outputs.drv }}
+        run: nix-store --realise "$DRV" --add-root npb
 
       - name: Run npb
         env:
           INPUT_PR: ${{ inputs.pr }}
-        run: nix run nixpkgs#npb -- --pr "$INPUT_PR" | tee report.md
+        run: ./npb/bin/npb --pr "$INPUT_PR" | tee report.md
 
       - name: Upload npb report
         uses: actions/upload-artifact@v7
@@ -57,3 +81,6 @@ jobs:
           overwrite: true
           archive: false
 
+      - name: Cache npb
+        if: always() && steps.cache-npb.outputs.cache-hit != 'true'
+        run: nix-store --query requisites npb | xargs nix-store --export >npb.cache
