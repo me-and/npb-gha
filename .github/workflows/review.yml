@@ -1,0 +1,60 @@
+name: npb review
+run-name: npb review #${{ inputs.pr }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: string
+
+jobs:
+  review:
+    name: Run npb
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - x86_64-linux
+          - aarch64-linux
+          - aarch64-darwin
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-latest
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Recover runner disk space
+        uses: wimpysworld/nothing-but-nix@v10
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          repository: NixOS/nixpkgs
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31.11.1
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Run npb
+        env:
+          INPUT_PR: ${{ inputs.pr }}
+        run: |
+          nix shell nixpkgs#npb -- --pr "$INPUT_PR" | tee report.md
+
+      - name: Upload npb report
+        uses: actions/upload-artifact@v7
+        with:
+          name: npb-${{ inputs.pr }}-${{ matrix.system }}.md
+          path: report.md
+          if-no-files-found: error
+          overwrite: true
+          archive: false
+
